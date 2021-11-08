@@ -623,14 +623,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--split_names",
         default=["train", "val", "test"],
-        choices=["train", "val", "test"],
         nargs="+",
         help="which splits of dataset to process",
     )
     parser.add_argument(
         "--add_target_to",
         default=["test"],
-        choices=["train", "val", "test"],
         nargs="+",
         help="add the abstractive target to these splits (useful for calculating rouge scores)",
     )
@@ -756,11 +754,6 @@ if __name__ == "__main__":
             + "shards to be created. Must use same 'shard_interval' that was used "
             + "previously to create the files to be resumed from."
         )
-
-    # The `nlp` library has specific names for the dataset split names so set them
-    # if using a dataset from `nlp`
-    if main_args.dataset:
-        main_args.split_names = ["train", "validation", "test"]
 
     # Setup logging config
     logging.basicConfig(
