@@ -86,7 +86,7 @@ def convert_to_extractive_driver(args):
         sentencizer = nlp.create_pipe("sentencizer")
         nlp.add_pipe(sentencizer)
     else:
-        nlp = spacy.load("en_core_web_sm", disable=["tagger", "ner"])
+        nlp = spacy.load("en_core_web_sm", disable=["tagger", "ner", "lemmatizer"])
 
     if args.dataset:
         dataset = hf_nlp.load_dataset(args.dataset, args.dataset_version)
