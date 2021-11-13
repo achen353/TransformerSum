@@ -27,8 +27,8 @@ from helpers import (
     generic_configure_optimizers,
     pad,
     pad_tensors,
+    strip_extra_spaces_and_newline,
     test_rouge,
-    strip_extra_spaces_and_newline
 )
 
 logger = logging.getLogger(__name__)
@@ -459,7 +459,9 @@ class AbstractiveSummarizer(pl.LightningModule):
                 sentencizer = spacy_nlp.create_pipe("sentencizer")
                 spacy_nlp.add_pipe(sentencizer)
             else:
-                spacy_nlp = spacy.load("en_core_web_sm", disable=["tagger", "ner", "lemmatizer"])
+                spacy_nlp = spacy.load(
+                    "en_core_web_sm", disable=["tagger", "ner", "lemmatizer"]
+                )
 
         # Combine the two sections of `scientific_papers` if it is chosen as the dataset
         if self.hparams.dataset == "scientific_papers":
@@ -555,7 +557,10 @@ class AbstractiveSummarizer(pl.LightningModule):
                 )
 
             self.dataset[split] = self.dataset[split].map(
-                lambda x: {key: strip_extra_spaces_and_newline(x[key]) for key in ["text", "title", "summary"]}
+                lambda x: {
+                    key: strip_extra_spaces_and_newline(x[key])
+                    for key in ["text", "title", "summary"]
+                }
             )
 
             logger.info("Converting %s dataset to features", split)
@@ -685,7 +690,8 @@ class AbstractiveSummarizer(pl.LightningModule):
 
     def calculate_loss(self, prediction_scores, labels):
         masked_lm_loss = self.loss_func(
-            prediction_scores.view(-1, self.model.config.encoder.vocab_size), labels.view(-1)
+            prediction_scores.view(-1, self.model.config.encoder.vocab_size),
+            labels.view(-1),
         )
         return masked_lm_loss
 
