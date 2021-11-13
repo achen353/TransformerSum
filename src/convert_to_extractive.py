@@ -72,7 +72,7 @@ def convert_to_extractive_driver(args):
     Driver function to convert an abstractive summarization dataset to an extractive dataset.
     The abstractive dataset must be formatted with two files for each split: a source and target
     file. Example file list for two splits:
-    ``["train.source", "train.target", "val.source", "val.target"]``
+    ``["train.source", "train.target", "validation.source", "validation.target"]``
     """
     # default is to output to input data directory if no output directory specified
     if not args.base_output_path:
@@ -212,7 +212,7 @@ def convert_to_extractive_process(
     # tokenize the source and target documents
     # each step runs in parallel on `args.n_process` threads with batch size `args.batch_size`
 
-    source_docs = strip_extra_spaces_and_newline(source_docs)
+    source_docs = [strip_extra_spaces_and_newline(doc) for doc in source_docs]
     source_docs_tokenized = tokenize(
         nlp,
         source_docs,
@@ -222,7 +222,7 @@ def convert_to_extractive_process(
         tokenizer_log_interval=args.tokenizer_log_interval,
     )
     del source_docs
-    target_docs = strip_extra_spaces_and_newline(target_docs)
+    target_docs = [strip_extra_spaces_and_newline(doc) for doc in target_docs]
     target_docs_tokenized = tokenize(
         nlp,
         target_docs,

@@ -28,6 +28,7 @@ from helpers import (
     pad,
     pad_tensors,
     test_rouge,
+    strip_extra_spaces_and_newline
 )
 
 logger = logging.getLogger(__name__)
@@ -178,6 +179,9 @@ class AbstractiveSummarizer(pl.LightningModule):
         self.rouge_metrics = None
         self.rouge_scorer = None
         self.dataset = {}
+
+        if not os.path.exists(self.hparams.cache_file_path):
+            os.makedirs(self.hparams.cache_file_path, exist_ok=True)
 
         self.tokenized_data_file_paths = {}
         for split in ["train", "validation", "test", "ca_test"]:
@@ -455,7 +459,7 @@ class AbstractiveSummarizer(pl.LightningModule):
                 sentencizer = spacy_nlp.create_pipe("sentencizer")
                 spacy_nlp.add_pipe(sentencizer)
             else:
-                spacy_nlp = spacy.load("en_core_web_sm", disable=["tagger", "ner"])
+                spacy_nlp = spacy.load("en_core_web_sm", disable=["tagger", "ner", "lemmatizer"])
 
         # Combine the two sections of `scientific_papers` if it is chosen as the dataset
         if self.hparams.dataset == "scientific_papers":
@@ -524,6 +528,12 @@ class AbstractiveSummarizer(pl.LightningModule):
                     self.hparams.dataset_version,
                     cache_dir=self.hparams.nlp_cache_dir,
                 )
+                if self.hparams.dataset == "billsum":
+                    split_train_set = self.dataset["train"].train_test_split(
+                        test_size=0.2, train_size=0.8, seed=8803
+                    )
+                    self.dataset["train"] = split_train_set["train"]
+                    self.dataset["validation"] = split_train_set["test"]
 
         for split, features_cache_file in self.tokenized_data_file_paths.items():
             # If the tokenized version has not been created yet, then do the initial
@@ -543,6 +553,10 @@ class AbstractiveSummarizer(pl.LightningModule):
                     start_num_examples - end_num_examples,
                     (1 - end_num_examples / start_num_examples) * 100,
                 )
+
+            self.dataset[split] = self.dataset[split].map(
+                lambda x: {key: strip_extra_spaces_and_newline(x[key]) for key in ["text", "title", "summary"]}
+            )
 
             logger.info("Converting %s dataset to features", split)
             self.dataset[split] = self.dataset[split].map(
@@ -671,7 +685,7 @@ class AbstractiveSummarizer(pl.LightningModule):
 
     def calculate_loss(self, prediction_scores, labels):
         masked_lm_loss = self.loss_func(
-            prediction_scores.view(-1, self.model.config.vocab_size), labels.view(-1)
+            prediction_scores.view(-1, self.model.config.encoder.vocab_size), labels.view(-1)
         )
         return masked_lm_loss
 
@@ -1061,7 +1075,7 @@ class AbstractiveSummarizer(pl.LightningModule):
         parser.add_argument(
             "--cache_file_path",
             type=str,
-            default=".",
+            default="../datasets/billsum_abstractive",
             help="Path to cache the tokenized dataset.",
         )
         parser.add_argument(
