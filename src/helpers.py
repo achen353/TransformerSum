@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import time
 from functools import partial
@@ -14,8 +15,6 @@ import torch.nn.functional as F
 import torch_optimizer
 from torch import nn
 from torch.utils.data import Sampler
-
-import re
 
 logger = logging.getLogger(__name__)
 

@@ -92,7 +92,9 @@ def convert_to_extractive_driver(args):
         dataset = hf_nlp.load_dataset(args.dataset, args.dataset_version)
 
     if args.dataset == "billsum":
-        split_train_set = dataset.train_test_split(test_size=0.2, train_size=0.8, seed=8803)
+        split_train_set = dataset.train_test_split(
+            test_size=0.2, train_size=0.8, seed=8803
+        )
         dataset["train"] = split_train_set["train"]
         dataset["validation"] = split_train_set["test"]
 
@@ -100,7 +102,7 @@ def convert_to_extractive_driver(args):
     for name in tqdm(
         args.split_names, total=len(args.split_names), desc="Dataset Split"
     ):
-        if args.dataset:    # if loading using the `nlp` library
+        if args.dataset:  # if loading using the `nlp` library
             current_dataset = dataset[name]
             source_file = current_dataset[args.data_example_column]
             target_file = current_dataset[args.data_summarized_column]
