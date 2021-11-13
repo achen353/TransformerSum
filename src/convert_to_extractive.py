@@ -18,7 +18,7 @@ from spacy.lang.en import English
 from tqdm import tqdm
 
 import datasets as hf_nlp
-from helpers import _get_word_ngrams, load_json
+from helpers import _get_word_ngrams, load_json, strip_extra_spaces_and_newline
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +86,17 @@ def convert_to_extractive_driver(args):
         sentencizer = nlp.create_pipe("sentencizer")
         nlp.add_pipe(sentencizer)
     else:
-        nlp = spacy.load("en_core_web_sm", disable=["tagger", "ner"])
+        nlp = spacy.load("en_core_web_sm", disable=["tagger", "ner", "lemmatizer"])
 
     if args.dataset:
         dataset = hf_nlp.load_dataset(args.dataset, args.dataset_version)
+
+    if args.dataset == "billsum":
+        split_train_set = dataset["train"].train_test_split(
+            test_size=0.2, train_size=0.8, seed=8803
+        )
+        dataset["train"] = split_train_set["train"]
+        dataset["validation"] = split_train_set["test"]
 
     # for each split
     for name in tqdm(
@@ -205,6 +212,7 @@ def convert_to_extractive_process(
     # tokenize the source and target documents
     # each step runs in parallel on `args.n_process` threads with batch size `args.batch_size`
 
+    source_docs = strip_extra_spaces_and_newline(source_docs)
     source_docs_tokenized = tokenize(
         nlp,
         source_docs,
@@ -214,6 +222,7 @@ def convert_to_extractive_process(
         tokenizer_log_interval=args.tokenizer_log_interval,
     )
     del source_docs
+    target_docs = strip_extra_spaces_and_newline(target_docs)
     target_docs_tokenized = tokenize(
         nlp,
         target_docs,
@@ -622,15 +631,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--split_names",
-        default=["train", "val", "test"],
-        choices=["train", "val", "test"],
+        default=["train", "validation", "test", "ca_test"],
         nargs="+",
         help="which splits of dataset to process",
     )
     parser.add_argument(
         "--add_target_to",
-        default=["test"],
-        choices=["train", "val", "test"],
+        default=["test", "ca_test"],
         nargs="+",
         help="add the abstractive target to these splits (useful for calculating rouge scores)",
     )
@@ -717,7 +724,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=str,
-        default=None,
+        default="billsum",
         help="The dataset name from the `nlp` library to use for training/evaluation/testing. "
         + "Default is None.",
     )
@@ -730,14 +737,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_example_column",
         type=str,
-        default=None,
+        default="text",
         help="The column of the `nlp` dataset that contains the text to be summarized. "
         + "Default is None.",
     )
     parser.add_argument(
         "--data_summarized_column",
         type=str,
-        default=None,
+        default="summary",
         help="The column of the `nlp` dataset that contains the summarized text. Default is None.",
     )
     parser.add_argument(
@@ -756,11 +763,6 @@ if __name__ == "__main__":
             + "shards to be created. Must use same 'shard_interval' that was used "
             + "previously to create the files to be resumed from."
         )
-
-    # The `nlp` library has specific names for the dataset split names so set them
-    # if using a dataset from `nlp`
-    if main_args.dataset:
-        main_args.split_names = ["train", "validation", "test"]
 
     # Setup logging config
     logging.basicConfig(

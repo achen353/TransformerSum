@@ -180,7 +180,7 @@ class AbstractiveSummarizer(pl.LightningModule):
         self.dataset = {}
 
         self.tokenized_data_file_paths = {}
-        for split in ["train", "validation", "test"]:
+        for split in ["train", "validation", "test", "ca_test"]:
             features_cache_file = os.path.join(
                 self.hparams.cache_file_path, (split + "_tokenized")
             )
@@ -1032,31 +1032,31 @@ class AbstractiveSummarizer(pl.LightningModule):
         parser.add_argument(
             "--dataset",
             nargs="+",
-            default="cnn_dailymail",
+            default="billsum",
             help="The dataset name from the `nlp` library or a list of paths to Apache Arrow "
             + "files (that can be loaded with `nlp`) in the order train, validation, test to "
             + "use for training/evaluation/testing. Paths must contain a '/' to be interpreted "
-            + "correctly. Default is `cnn_dailymail`.",
+            + "correctly. Default is `billsum`.",
         )
         parser.add_argument(
             "--dataset_version",
             type=str,
-            default="3.0.0",
+            default=None,
             help="The version of the dataset specified by `--dataset`.",
         )
         parser.add_argument(
             "--data_example_column",
             type=str,
-            default="article",
+            default="text",
             help="The column of the `nlp` dataset that contains the text to be summarized. "
-            + "Default value is for the `cnn_dailymail` dataset.",
+            + "Default value is for the `billsum` dataset.",
         )
         parser.add_argument(
             "--data_summarized_column",
             type=str,
-            default="highlights",
+            default="summary",
             help="The column of the `nlp` dataset that contains the summarized text. "
-            + "Default value is for the `cnn_dailymail` dataset.",
+            + "Default value is for the `billsum` dataset.",
         )
         parser.add_argument(
             "--cache_file_path",

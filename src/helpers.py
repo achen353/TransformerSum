@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import time
 from functools import partial
@@ -453,3 +454,13 @@ def generic_configure_optimizers(hparams, train_dataloader, params_to_update):
         return ([optimizer], [scheduler_dict])
 
     return optimizer
+
+
+def strip_extra_spaces_and_newline(docs):
+    clean_docs = []
+    for doc in docs:
+        text = re.sub(r"\n", "", doc)
+        text = re.sub(r"\s+", " ", text)
+        clean_docs.append(text)
+    del docs
+    return clean_docs
