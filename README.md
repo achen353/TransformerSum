@@ -72,7 +72,7 @@ python main.py \
     --do_train \
     --model_max_length 512
 ```
-You should modify the values for `--model_name_or_path`, `--decoder_model_name_or_path`, and `--model_max_length_512`.
+You should modify the values for `--model_name_or_path`, `--decoder_model_name_or_path`, and `--model_max_length`.
 For more argument options, see the [documentation](https://transformersum.readthedocs.io/en/latest/abstractive/training.html) 
 for training an abstractive summarizer.
 
