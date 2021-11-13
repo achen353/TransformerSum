@@ -18,7 +18,7 @@ from spacy.lang.en import English
 from tqdm import tqdm
 
 import datasets as hf_nlp
-from helpers import _get_word_ngrams, load_json
+from helpers import _get_word_ngrams, load_json, strip_extra_spaces_and_newline
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +91,16 @@ def convert_to_extractive_driver(args):
     if args.dataset:
         dataset = hf_nlp.load_dataset(args.dataset, args.dataset_version)
 
+    if args.dataset == "billsum":
+        split_train_set = dataset.train_test_split(test_size=0.2, train_size=0.8, seed=8803)
+        dataset["train"] = split_train_set["train"]
+        dataset["validation"] = split_train_set["test"]
+
     # for each split
     for name in tqdm(
         args.split_names, total=len(args.split_names), desc="Dataset Split"
     ):
-        if args.dataset:  # if loading using the `nlp` library
+        if args.dataset:    # if loading using the `nlp` library
             current_dataset = dataset[name]
             source_file = current_dataset[args.data_example_column]
             target_file = current_dataset[args.data_summarized_column]
@@ -205,6 +210,7 @@ def convert_to_extractive_process(
     # tokenize the source and target documents
     # each step runs in parallel on `args.n_process` threads with batch size `args.batch_size`
 
+    source_docs = strip_extra_spaces_and_newline(source_docs)
     source_docs_tokenized = tokenize(
         nlp,
         source_docs,
@@ -214,6 +220,7 @@ def convert_to_extractive_process(
         tokenizer_log_interval=args.tokenizer_log_interval,
     )
     del source_docs
+    target_docs = strip_extra_spaces_and_newline(target_docs)
     target_docs_tokenized = tokenize(
         nlp,
         target_docs,
@@ -622,13 +629,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--split_names",
-        default=["train", "val", "test"],
+        default=["train", "validation", "test", "ca_test"],
         nargs="+",
         help="which splits of dataset to process",
     )
     parser.add_argument(
         "--add_target_to",
-        default=["test"],
+        default=["test", "ca_test"],
         nargs="+",
         help="add the abstractive target to these splits (useful for calculating rouge scores)",
     )

@@ -255,7 +255,7 @@ if __name__ == "__main__":
         "--seed",
         type=int,
         default=None,
-        help="Seed for reproducible results. Can negatively impact performace in some cases.",
+        help="Seed for reproducible results. Can negatively impact performance in some cases.",
     )
     parser.add_argument(
         "--profiler",
