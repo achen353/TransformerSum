@@ -724,7 +724,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=str,
-        default=None,
+        default="billsum",
         help="The dataset name from the `nlp` library to use for training/evaluation/testing. "
         + "Default is None.",
     )
@@ -737,14 +737,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_example_column",
         type=str,
-        default=None,
+        default="text",
         help="The column of the `nlp` dataset that contains the text to be summarized. "
         + "Default is None.",
     )
     parser.add_argument(
         "--data_summarized_column",
         type=str,
-        default=None,
+        default="summary",
         help="The column of the `nlp` dataset that contains the summarized text. Default is None.",
     )
     parser.add_argument(
