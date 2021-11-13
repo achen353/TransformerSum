@@ -92,7 +92,7 @@ def convert_to_extractive_driver(args):
         dataset = hf_nlp.load_dataset(args.dataset, args.dataset_version)
 
     if args.dataset == "billsum":
-        split_train_set = dataset.train_test_split(
+        split_train_set = dataset["train"].train_test_split(
             test_size=0.2, train_size=0.8, seed=8803
         )
         dataset["train"] = split_train_set["train"]
