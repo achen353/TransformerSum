@@ -521,7 +521,7 @@ class ExtractiveSummarizer(pl.LightningModule):
             # if preprocessing has not happened then `dataset_files` should be an empty list
             # and the data will be processed
             dataset_files = glob.glob(
-                os.path.join(self.hparams.data_path, "*" + corpus_type + ".*.*")
+                os.path.join(self.hparams.data_path, "*" + corpus_type + ".*")
             )
             # remove json files from glob results since they are unprocessed files
             dataset_files = [x for x in dataset_files if "json" not in x]
@@ -532,14 +532,14 @@ class ExtractiveSummarizer(pl.LightningModule):
             dataset_files = glob.glob(
                 os.path.join(
                     self.hparams.data_path,
-                    "*" + corpus_type + ".*." + inferred_data_type,
+                    "*" + corpus_type + "." + inferred_data_type,
                 )
             )
 
             # if no dataset files detected or model is set to `only_preprocess`
             if (not dataset_files) or (self.hparams.only_preprocess):
                 json_files = glob.glob(
-                    os.path.join(self.hparams.data_path, "*" + corpus_type + ".*.json*")
+                    os.path.join(self.hparams.data_path, "*" + corpus_type + ".json*")
                 )
                 if len(json_files) == 0:
                     logger.error(
@@ -593,7 +593,7 @@ class ExtractiveSummarizer(pl.LightningModule):
                 dataset_files = glob.glob(
                     os.path.join(
                         self.hparams.data_path,
-                        "*" + corpus_type + ".*." + inferred_data_type,
+                        "*" + corpus_type + "." + inferred_data_type,
                     )
                 )
 
@@ -1333,7 +1333,7 @@ class ExtractiveSummarizer(pl.LightningModule):
         parser.add_argument(
             "--val_name",
             type=str,
-            default="val",
+            default="validation",
             help="name for set of validation files on disk (for loading and saving)",
         )
         parser.add_argument(
