@@ -468,10 +468,10 @@ def generic_configure_optimizers(hparams, train_dataloader, params_to_update):
     return optimizer
 
 
-# def strip_extra_spaces_and_newline(text):
-#     text = re.sub(r"\n", "", text)
-#     text = re.sub(r"\s+", " ", text)
-#     return text
+def strip_extra_spaces_and_newline(text):
+    text = re.sub(r"\n", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text
 
 
 def replace_semicolon(text, threshold=10):
@@ -498,13 +498,14 @@ def replace_semicolon(text, threshold=10):
     return new_text
 
 
-def clean_text(text):
+def clean_billsum_text(text):
     """
+    Cleans and sections legal texts in BillSum, read comments in function
+    for details.
     Borrowed from the FNDS text processing with additional logic added in.
     Note: we do not take care of token breaking - assume SPACY's tokenizer
     will handle this for us.
     """
-
     # Indicate section headers, we need them for features
     text = SECTION_HEADER_RE.sub('SECTION-HEADER', text)
     # For simplicity later, remove '.' from most common acronym
