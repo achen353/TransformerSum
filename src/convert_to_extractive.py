@@ -18,7 +18,12 @@ from spacy.lang.en import English
 from tqdm import tqdm
 
 import datasets as hf_nlp
-from helpers import _get_word_ngrams, load_json, strip_extra_spaces_and_newline
+from helpers import (
+    _get_word_ngrams,
+    clean_billsum_text,
+    load_json,
+    strip_extra_spaces_and_newline,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +217,10 @@ def convert_to_extractive_process(
     # tokenize the source and target documents
     # each step runs in parallel on `args.n_process` threads with batch size `args.batch_size`
 
-    source_docs = [strip_extra_spaces_and_newline(doc) for doc in source_docs]
+    if args.dataset == "billsum":
+        source_docs = [clean_billsum_text(doc) for doc in source_docs]
+    else:
+        source_docs = [strip_extra_spaces_and_newline(doc) for doc in source_docs]
     source_docs_tokenized = tokenize(
         nlp,
         source_docs,
@@ -222,7 +230,10 @@ def convert_to_extractive_process(
         tokenizer_log_interval=args.tokenizer_log_interval,
     )
     del source_docs
-    target_docs = [strip_extra_spaces_and_newline(doc) for doc in target_docs]
+    if args.dataset == "billsum":
+        target_docs = [clean_billsum_text(doc) for doc in target_docs]
+    else:
+        target_docs = [strip_extra_spaces_and_newline(doc) for doc in target_docs]
     target_docs_tokenized = tokenize(
         nlp,
         target_docs,
@@ -769,5 +780,4 @@ if __name__ == "__main__":
         format="%(asctime)s|%(name)s|%(levelname)s> %(message)s",
         level=logging.getLevelName(main_args.logLevel),
     )
-
     convert_to_extractive_driver(main_args)
