@@ -219,7 +219,7 @@ def convert_to_extractive_process(
 
     if args.dataset == "billsum":
         source_docs = [clean_billsum_text(doc) for doc in source_docs]
-    elif args.dataset:
+    else:
         source_docs = [strip_extra_spaces_and_newline(doc) for doc in source_docs]
     source_docs_tokenized = tokenize(
         nlp,
