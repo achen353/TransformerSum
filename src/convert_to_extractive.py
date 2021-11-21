@@ -9,11 +9,10 @@ import os
 import re
 import sys
 from argparse import ArgumentParser
+from collections import defaultdict
 from functools import partial
 from multiprocessing import Pool
 from time import time
-
-from collections import defaultdict
 
 import spacy
 from spacy.lang.en import English
