@@ -505,17 +505,20 @@ def example_processor(
         )
         preprocessed_data = []
         for source_section, target_section in zip(source_doc, target_doc_by_section):
-            if oracle_mode == "greedy":
-                section_oracle_ids = greedy_selection(source_section, target_section, 3)
-            elif oracle_mode == "combination":
-                section_oracle_ids = combination_selection(
-                    source_section, target_section, 3
-                )
+            if target_section:
+                if oracle_mode == "greedy":
+                    section_oracle_ids = greedy_selection(source_section, target_section, 3)
+                elif oracle_mode == "combination":
+                    section_oracle_ids = combination_selection(
+                        source_section, target_section, 3
+                    )
 
-            # `section_oracle_ids` to labels
-            labels = [0] * len(source_section)
-            for l_id in section_oracle_ids:
-                labels[l_id] = 1
+                # `section_oracle_ids` to labels
+                labels = [0] * len(source_section)
+                for l_id in section_oracle_ids:
+                    labels[l_id] = 1
+            else:
+                labels = [0] * len(source_section)
 
             # The number of sentences in the source document should equal the number of labels.
             # There should be one label per sentence.
@@ -540,8 +543,7 @@ def example_processor(
                     args.min_example_nsents,
                     args.max_example_nsents,
                 )
-
-        preprocessed_data.append(preprocessed_section)
+            preprocessed_data.append(preprocessed_section)
         return preprocessed_data, target_doc
     else:
         if oracle_mode == "greedy":
@@ -760,6 +762,8 @@ def assign_section_level_summaries(source_doc, target_doc):
         j_list = section_summary_mapping.get(i, [])
         section_summary = [target_doc[j] for j in j_list]
         target_doc_by_section.append(section_summary)
+
+    assert len(target_doc) == sum(len(section) for section in target_doc_by_section)
 
     del clean_source_doc
     del clean_target_doc
