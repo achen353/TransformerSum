@@ -507,7 +507,9 @@ def example_processor(
         for source_section, target_section in zip(source_doc, target_doc_by_section):
             if target_section:
                 if oracle_mode == "greedy":
-                    section_oracle_ids = greedy_selection(source_section, target_section, 3)
+                    section_oracle_ids = greedy_selection(
+                        source_section, target_section, 3
+                    )
                 elif oracle_mode == "combination":
                     section_oracle_ids = combination_selection(
                         source_section, target_section, 3
