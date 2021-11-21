@@ -220,7 +220,7 @@ def convert_to_extractive_process(
 
     if args.dataset and args.dataset == "billsum":
         section_header = "<SECTION-HEADER>"
-        source_docs = [clean_billsum_text(doc) for doc in source_docs]
+        source_docs = [clean_billsum_text(doc) for doc in source_docs[:10]]
         source_docs = [doc.split(section_header) for doc in source_docs]
         source_docs = [list(map(str.strip, doc)) for doc in source_docs]
         source_docs_tokenized = [
@@ -248,7 +248,7 @@ def convert_to_extractive_process(
         )
     del source_docs
     if args.dataset and args.dataset == "billsum":
-        target_docs = [clean_billsum_text(doc) for doc in target_docs]
+        target_docs = [clean_billsum_text(doc) for doc in target_docs[:10]]
     else:
         target_docs = [strip_extra_spaces_and_newline(doc) for doc in target_docs]
     target_docs_tokenized = tokenize(
