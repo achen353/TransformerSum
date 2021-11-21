@@ -9,6 +9,7 @@ import os
 import re
 import sys
 from argparse import ArgumentParser
+from collections import defaultdict
 from functools import partial
 from multiprocessing import Pool
 from time import time
@@ -217,20 +218,36 @@ def convert_to_extractive_process(
     # tokenize the source and target documents
     # each step runs in parallel on `args.n_process` threads with batch size `args.batch_size`
 
-    if args.dataset == "billsum":
+    if args.dataset and args.dataset == "billsum":
+        section_header = "<SECTION-HEADER>"
         source_docs = [clean_billsum_text(doc) for doc in source_docs]
+        source_docs = [doc.split(section_header) for doc in source_docs]
+        source_docs = [list(map(str.strip, doc)) for doc in source_docs]
+        source_docs_tokenized = [
+            list(
+                tokenize(
+                    nlp,
+                    doc,
+                    args.n_process,
+                    args.batch_size,
+                    name=(" " + name + "-" + args.source_ext),
+                    tokenizer_log_interval=args.tokenizer_log_interval,
+                )
+            )
+            for doc in source_docs
+        ]
     else:
         source_docs = [strip_extra_spaces_and_newline(doc) for doc in source_docs]
-    source_docs_tokenized = tokenize(
-        nlp,
-        source_docs,
-        args.n_process,
-        args.batch_size,
-        name=(" " + name + "-" + args.source_ext),
-        tokenizer_log_interval=args.tokenizer_log_interval,
-    )
+        source_docs_tokenized = tokenize(
+            nlp,
+            source_docs,
+            args.n_process,
+            args.batch_size,
+            name=(" " + name + "-" + args.source_ext),
+            tokenizer_log_interval=args.tokenizer_log_interval,
+        )
     del source_docs
-    if args.dataset == "billsum":
+    if args.dataset and args.dataset == "billsum":
         target_docs = [clean_billsum_text(doc) for doc in target_docs]
     else:
         target_docs = [strip_extra_spaces_and_newline(doc) for doc in target_docs]
@@ -243,11 +260,13 @@ def convert_to_extractive_process(
         tokenizer_log_interval=args.tokenizer_log_interval,
     )
     # set a constant `oracle_mode`
+    is_billsum = args.dataset and args.dataset == "billsum"
     _example_processor = partial(
         example_processor,
         args=args,
         oracle_mode=args.oracle_mode,
         no_preprocess=args.no_preprocess,
+        is_billsum=is_billsum,
     )
 
     dataset = []
@@ -255,12 +274,15 @@ def convert_to_extractive_process(
     logger.info("Processing %s", name)
     t0 = time()
     for (preprocessed_data, target_doc) in pool.map(
-        _example_processor,
-        zip(source_docs_tokenized, target_docs_tokenized),
+        _example_processor, zip(source_docs_tokenized, target_docs_tokenized)
     ):
-        if preprocessed_data is not None:
-            # preprocessed_data is (source_doc, labels)
-            to_append = {"src": preprocessed_data[0], "labels": preprocessed_data[1]}
+        if is_billsum:
+            src, labels = [], []
+            for preprocessed_section in preprocessed_data:
+                if preprocessed_section:
+                    src.append(preprocessed_section[0])
+                    labels.append(preprocessed_section[1])
+            to_append = {"src": src, "labels": labels}
             if name in args.add_target_to:
                 # Convert the tokenized list of sentences where each sentence is a list of tokens
                 # to a string where each sentence is separated by "<q>". This is necessary for
@@ -269,6 +291,23 @@ def convert_to_extractive_process(
                 # when necessary since "<q>" is easier to store than "\n".
                 to_append["tgt"] = "<q>".join([" ".join(sent) for sent in target_doc])
             dataset.append(to_append)
+        else:
+            if preprocessed_data is not None:
+                # preprocessed_data is (source_doc, labels)
+                to_append = {
+                    "src": preprocessed_data[0],
+                    "labels": preprocessed_data[1],
+                }
+                if name in args.add_target_to:
+                    # Convert the tokenized list of sentences where each sentence is a list of tokens
+                    # to a string where each sentence is separated by "<q>". This is necessary for
+                    # proper ROUGE score calculation. Each sentence should be separated by a newline
+                    # for ROUGE to work properly, but we use "<q>" and convert it back to a newline
+                    # when necessary since "<q>" is easier to store than "\n".
+                    to_append["tgt"] = "<q>".join(
+                        [" ".join(sent) for sent in target_doc]
+                    )
+                dataset.append(to_append)
 
     pool.close()
     pool.join()
@@ -426,11 +465,7 @@ def tokenize(
     tokenized = []
 
     for doc in tqdm(
-        nlp.pipe(
-            docs,
-            n_process=n_process,
-            batch_size=batch_size,
-        ),
+        nlp.pipe(docs, n_process=n_process, batch_size=batch_size),
         total=len(docs),
         desc="Tokenizing" + name,
         mininterval=tokenizer_log_interval,
@@ -456,45 +491,96 @@ def tokenize(
     return sents
 
 
-def example_processor(inputs, args, oracle_mode="greedy", no_preprocess=False):
+def example_processor(
+    inputs, args, oracle_mode="greedy", no_preprocess=False, is_billsum=False
+):
     """
     Create ``oracle_ids``, convert them to ``labels`` and run
     :meth:`~convert_to_extractive.preprocess`.
     """
     source_doc, target_doc = inputs
-    if oracle_mode == "greedy":
-        oracle_ids = greedy_selection(source_doc, target_doc, 3)
-    elif oracle_mode == "combination":
-        oracle_ids = combination_selection(source_doc, target_doc, 3)
-
-    # `oracle_ids` to labels
-    labels = [0] * len(source_doc)
-    for l_id in oracle_ids:
-        labels[l_id] = 1
-
-    # The number of sentences in the source document should equal the number of labels.
-    # There should be one label per sentence.
-    assert len(source_doc) == len(labels), (
-        "Document: "
-        + str(source_doc)
-        + "\nLabels: "
-        + str(labels)
-        + "\n^^ The above document and label combination are not equal in length. The cause of "
-        + "this problem in not known. This check exists to prevent further problems down the "
-        + "data processing pipeline."
-    )
-
-    if no_preprocess:
-        preprocessed_data = source_doc, labels
-    else:
-        preprocessed_data = preprocess(
-            source_doc,
-            labels,
-            args.min_sentence_ntokens,
-            args.max_sentence_ntokens,
-            args.min_example_nsents,
-            args.max_example_nsents,
+    if is_billsum:
+        source_doc, target_doc_by_section, target_doc = assign_section_level_summaries(
+            source_doc, target_doc
         )
+        preprocessed_data = []
+        for source_section, target_section in zip(source_doc, target_doc_by_section):
+            if target_section:
+                if oracle_mode == "greedy":
+                    section_oracle_ids = greedy_selection(
+                        source_section, target_section, 3
+                    )
+                elif oracle_mode == "combination":
+                    section_oracle_ids = combination_selection(
+                        source_section, target_section, 3
+                    )
+
+                # `section_oracle_ids` to labels
+                labels = [0] * len(source_section)
+                for l_id in section_oracle_ids:
+                    labels[l_id] = 1
+            else:
+                labels = [0] * len(source_section)
+
+            # The number of sentences in the source document should equal the number of labels.
+            # There should be one label per sentence.
+            assert len(source_section) == len(labels), (
+                "Document Section: "
+                + str(source_section)
+                + "\nLabels: "
+                + str(labels)
+                + "\n^^ The above section and label combination are not equal in length. The cause of "
+                + "this problem in not known. This check exists to prevent further problems down the "
+                + "data processing pipeline."
+            )
+
+            if no_preprocess:
+                preprocessed_section = source_section, labels
+            else:
+                preprocessed_section = preprocess(
+                    source_section,
+                    labels,
+                    args.min_sentence_ntokens,
+                    args.max_sentence_ntokens,
+                    args.min_example_nsents,
+                    args.max_example_nsents,
+                )
+            preprocessed_data.append(preprocessed_section)
+        return preprocessed_data, target_doc
+    else:
+        if oracle_mode == "greedy":
+            oracle_ids = greedy_selection(source_doc, target_doc, 3)
+        elif oracle_mode == "combination":
+            oracle_ids = combination_selection(source_doc, target_doc, 3)
+
+        # `oracle_ids` to labels
+        labels = [0] * len(source_doc)
+        for l_id in oracle_ids:
+            labels[l_id] = 1
+
+        # The number of sentences in the source document should equal the number of labels.
+        # There should be one label per sentence.
+        assert len(source_doc) == len(labels), (
+            "Document: "
+            + str(source_doc)
+            + "\nLabels: "
+            + str(labels)
+            + "\n^^ The above document and label combination are not equal in length. The cause of "
+            + "this problem in not known. This check exists to prevent further problems down the "
+            + "data processing pipeline."
+        )
+
+        if no_preprocess:
+            preprocessed_data = source_doc, labels
+        else:
+            preprocessed_data = preprocess(
+                source_doc,
+                labels,
+                args.min_sentence_ntokens,
+                args.max_sentence_ntokens,
+                args.min_example_nsents,
+                args.max_example_nsents,
+            )
 
     return preprocessed_data, target_doc
 
@@ -626,6 +712,67 @@ def cal_rouge(evaluated_ngrams, reference_ngrams):
     return {"f": f1_score, "p": precision, "r": recall}
 
 
+def assign_section_level_summaries(source_doc, target_doc):
+    """For each document, which is originally a document-summary mapping, break down the summary such that each sentence
+    of the summary is assigned to a section of the original document. Conversely, each section of the document could be
+    assigned none or 1 or more than 1 sentence from the summary. These sentences would be concatenated together for each
+    section, forming section level abstractive summary.
+    Args:
+        source_docs_tokenized: list[list[list[str]]]
+        target_docs_tokenized: list[list[str]]
+    """
+
+    def _rouge_clean(s):
+        return re.sub(r"[^a-zA-Z0-9 ]", "", s)
+
+    def _cal_rouge(
+        evaluated_1grams, reference_1grams, evaluated_2grams, reference_2grams
+    ):
+        rouge_1 = cal_rouge(evaluated_1grams, reference_1grams)["f"]
+        rouge_2 = cal_rouge(evaluated_2grams, reference_2grams)["f"]
+        rouge_score = rouge_1 + rouge_2
+        return rouge_score
+
+    # Clean target_doc
+    clean_target_doc = [_rouge_clean(" ".join(doc)).split() for doc in target_doc]
+
+    # Clean source doc by section and assign section level summaries
+    clean_source_doc = []
+    for i, source_section in enumerate(source_doc):
+        source_section = sum(source_section, [])
+        source_section = _rouge_clean(" ".join(source_section)).split()
+        clean_source_doc.append(source_section)
+
+    section_summary_mapping = defaultdict(list)
+    for j, target_sent in enumerate(clean_target_doc):
+        cur_max_rouge, idx_of_cur_max_rouge = 0.0, 0
+        for i, source_section in enumerate(clean_source_doc):
+            evaluated_1grams = _get_word_ngrams(1, [source_section])
+            reference_1grams = _get_word_ngrams(1, [target_sent])
+            evaluated_2grams = _get_word_ngrams(2, [source_section])
+            reference_2grams = _get_word_ngrams(2, [target_sent])
+            rouge = _cal_rouge(
+                evaluated_1grams, reference_1grams, evaluated_2grams, reference_2grams
+            )
+            if rouge > cur_max_rouge:
+                cur_max_rouge = rouge
+                idx_of_cur_max_rouge = i
+        section_summary_mapping[idx_of_cur_max_rouge].append(j)
+
+    target_doc_by_section = []
+    for i in range(len(source_doc)):
+        j_list = section_summary_mapping.get(i, [])
+        section_summary = [target_doc[j] for j in j_list]
+        target_doc_by_section.append(section_summary)
+
+    assert len(target_doc) == sum(len(section) for section in target_doc_by_section)
+
+    del clean_source_doc
+    del clean_target_doc
+
+    return source_doc, target_doc_by_section, target_doc
+
+
 if __name__ == "__main__":
     parser = ArgumentParser(
         description="Convert an Abstractive Summarization Dataset to the Extractive Task"
@@ -685,11 +832,7 @@ if __name__ == "__main__":
         action="store_true",
         help="use gzip compression when saving data",
     )
-    parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="resume from last shard",
-    )
+    parser.add_argument("--resume", action="store_true", help="resume from last shard")
     parser.add_argument(
         "--tokenizer_log_interval",
         type=float,
