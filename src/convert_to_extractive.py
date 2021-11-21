@@ -13,6 +13,8 @@ from functools import partial
 from multiprocessing import Pool
 from time import time
 
+from collections import defaultdict
+
 import spacy
 from spacy.lang.en import English
 from tqdm import tqdm
@@ -217,19 +219,21 @@ def convert_to_extractive_process(
     # tokenize the source and target documents
     # each step runs in parallel on `args.n_process` threads with batch size `args.batch_size`
 
-    if args.dataset == "billsum":
+    if args.dataset and args.dataset == "billsum":
         section_header = "<SECTION-HEADER>"
-        source_docs = [clean_billsum_text(doc) for doc in source_docs]
+        source_docs = [clean_billsum_text(doc) for doc in source_docs[:10]]
         source_docs = [doc.split(section_header) for doc in source_docs]
         source_docs = [list(map(str.strip, doc)) for doc in source_docs]
         source_docs_tokenized = [
-            tokenize(
-                nlp,
-                doc,
-                args.n_process,
-                args.batch_size,
-                name=(" " + name + "-" + args.source_ext),
-                tokenizer_log_interval=args.tokenizer_log_interval,
+            list(
+                tokenize(
+                    nlp,
+                    doc,
+                    args.n_process,
+                    args.batch_size,
+                    name=(" " + name + "-" + args.source_ext),
+                    tokenizer_log_interval=args.tokenizer_log_interval,
+                )
             )
             for doc in source_docs
         ]
@@ -244,8 +248,8 @@ def convert_to_extractive_process(
             tokenizer_log_interval=args.tokenizer_log_interval,
         )
     del source_docs
-    if args.dataset == "billsum":
-        target_docs = [clean_billsum_text(doc) for doc in target_docs]
+    if args.dataset and args.dataset == "billsum":
+        target_docs = [clean_billsum_text(doc) for doc in target_docs[:10]]
     else:
         target_docs = [strip_extra_spaces_and_newline(doc) for doc in target_docs]
     target_docs_tokenized = tokenize(
@@ -271,27 +275,23 @@ def convert_to_extractive_process(
     logger.info("Processing %s", name)
     t0 = time()
     for (preprocessed_data, target_doc) in pool.map(
-        _example_processor,
-        zip(source_docs_tokenized, target_docs_tokenized),
+        _example_processor, zip(source_docs_tokenized, target_docs_tokenized)
     ):
         if is_billsum:
-            if preprocessed_data is not None:
-                # preprocessed_data is (source_doc, labels)
-                src, labels = [], []
-                for preprocessed_section in preprocessed_data:
+            src, labels = [], []
+            for preprocessed_section in preprocessed_data:
+                if preprocessed_section:
                     src.append(preprocessed_section[0])
                     labels.append(preprocessed_section[1])
-                to_append = {"src": src, "labels": labels}
-                if name in args.add_target_to:
-                    # Convert the tokenized list of sentences where each sentence is a list of tokens
-                    # to a string where each sentence is separated by "<q>". This is necessary for
-                    # proper ROUGE score calculation. Each sentence should be separated by a newline
-                    # for ROUGE to work properly, but we use "<q>" and convert it back to a newline
-                    # when necessary since "<q>" is easier to store than "\n".
-                    to_append["tgt"] = "<q>".join(
-                        [" ".join(sent) for sent in target_doc]
-                    )
-                dataset.append(to_append)
+            to_append = {"src": src, "labels": labels}
+            if name in args.add_target_to:
+                # Convert the tokenized list of sentences where each sentence is a list of tokens
+                # to a string where each sentence is separated by "<q>". This is necessary for
+                # proper ROUGE score calculation. Each sentence should be separated by a newline
+                # for ROUGE to work properly, but we use "<q>" and convert it back to a newline
+                # when necessary since "<q>" is easier to store than "\n".
+                to_append["tgt"] = "<q>".join([" ".join(sent) for sent in target_doc])
+            dataset.append(to_append)
         else:
             if preprocessed_data is not None:
                 # preprocessed_data is (source_doc, labels)
@@ -466,11 +466,7 @@ def tokenize(
     tokenized = []
 
     for doc in tqdm(
-        nlp.pipe(
-            docs,
-            n_process=n_process,
-            batch_size=batch_size,
-        ),
+        nlp.pipe(docs, n_process=n_process, batch_size=batch_size),
         total=len(docs),
         desc="Tokenizing" + name,
         mininterval=tokenizer_log_interval,
@@ -505,9 +501,11 @@ def example_processor(
     """
     source_doc, target_doc = inputs
     if is_billsum:
-        source_doc, target_doc = assign_section_level_summaries(source_doc, target_doc)
+        source_doc, target_doc_by_section, target_doc = assign_section_level_summaries(
+            source_doc, target_doc
+        )
         preprocessed_data = []
-        for source_section, target_section in zip(source_doc, target_doc):
+        for source_section, target_section in zip(source_doc, target_doc_by_section):
             if oracle_mode == "greedy":
                 section_oracle_ids = greedy_selection(source_section, target_section, 3)
             elif oracle_mode == "combination":
@@ -733,31 +731,22 @@ def assign_section_level_summaries(source_doc, target_doc):
         return rouge_score
 
     # Clean target_doc
-    clean_target_doc = []
-    for target_sent in target_doc:
-        target_sent = sum(target_sent, [])
-        target_sent = _rouge_clean(" ".join(target_sent)).split()
-        clean_target_doc.append(target_sent)
+    clean_target_doc = [_rouge_clean(" ".join(doc)).split() for doc in target_doc]
 
     # Clean source doc by section and assign section level summaries
     clean_source_doc = []
     for i, source_section in enumerate(source_doc):
-        source_section_sent = [
-            _rouge_clean(" ".join(s)).split() for s in source_section
-        ]
-        clean_source_doc.append(source_section_sent)
+        source_section = sum(source_section, [])
+        source_section = _rouge_clean(" ".join(source_section)).split()
+        clean_source_doc.append(source_section)
 
-    section_summary_mapping = dict()
+    section_summary_mapping = defaultdict(list)
     for j, target_sent in enumerate(clean_target_doc):
         cur_max_rouge, idx_of_cur_max_rouge = 0.0, 0
-        for i, source_section_sent in clean_source_doc:
-            evaluated_1grams = [
-                _get_word_ngrams(1, [sent]) for sent in source_section_sent
-            ]
+        for i, source_section in enumerate(clean_source_doc):
+            evaluated_1grams = _get_word_ngrams(1, [source_section])
             reference_1grams = _get_word_ngrams(1, [target_sent])
-            evaluated_2grams = [
-                _get_word_ngrams(2, [sent]) for sent in source_section_sent
-            ]
+            evaluated_2grams = _get_word_ngrams(2, [source_section])
             reference_2grams = _get_word_ngrams(2, [target_sent])
             rouge = _cal_rouge(
                 evaluated_1grams, reference_1grams, evaluated_2grams, reference_2grams
@@ -776,7 +765,7 @@ def assign_section_level_summaries(source_doc, target_doc):
     del clean_source_doc
     del clean_target_doc
 
-    return source_doc, target_doc_by_section
+    return source_doc, target_doc_by_section, target_doc
 
 
 if __name__ == "__main__":
@@ -838,11 +827,7 @@ if __name__ == "__main__":
         action="store_true",
         help="use gzip compression when saving data",
     )
-    parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="resume from last shard",
-    )
+    parser.add_argument("--resume", action="store_true", help="resume from last shard")
     parser.add_argument(
         "--tokenizer_log_interval",
         type=float,
