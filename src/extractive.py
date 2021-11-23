@@ -378,6 +378,7 @@ class ExtractiveSummarizer(pl.LightningModule):
         inputs=None,
         num_files=0,
         processor=None,
+        corpus_type=None,
     ):
         """Convert json output from ``convert_to_extractive.py`` to a ".pt" file containing
         lists or tensors using a :class:`data.SentencesProcessor`. This function is run by
@@ -406,14 +407,20 @@ class ExtractiveSummarizer(pl.LightningModule):
         all_targets = []
         for doc in documents:  # for each document in the json file
             source = doc["src"]
-            if "tgt" in doc:
-                target = doc["tgt"]
-                all_targets.append(target)
-
             ids = doc["labels"]
-
-            all_sources.append(source)
-            all_ids.append(ids)
+            if hparams.by_section and "test" not in corpus_type:
+                for sec_source, sec_ids in zip(source, ids):
+                    all_sources.append(sec_source)
+                    all_ids.append(sec_ids)
+                    if "tgt" in doc:
+                        target = doc["tgt"]
+                        all_targets.append(target)
+            else:
+                all_sources.append(source)
+                all_ids.append(ids)
+                if "tgt" in doc:
+                    target = doc["tgt"]
+                    all_targets.append(target)
 
         processor.add_examples(
             all_sources,
@@ -421,6 +428,7 @@ class ExtractiveSummarizer(pl.LightningModule):
             targets=all_targets if all_targets else None,
             overwrite_examples=True,
             overwrite_labels=True,
+            by_section_test_split=hparams.by_section and "test" in corpus_type,
         )
 
         processor.get_features(
@@ -441,6 +449,7 @@ class ExtractiveSummarizer(pl.LightningModule):
             save_to_path=hparams.data_path,
             save_to_name=os.path.basename(file_path),
             save_as_type=hparams.data_type,
+            by_section_test_split=hparams.by_section and "test" in corpus_type,
         )
 
     def prepare_data(self):
@@ -578,6 +587,7 @@ class ExtractiveSummarizer(pl.LightningModule):
                     self.hparams,
                     num_files=num_files,
                     processor=self.processor,
+                    corpus_type=corpus_type,
                 )
 
                 for _ in map(
