@@ -1,6 +1,7 @@
 import gc
 import glob
 import gzip
+import heapq
 import itertools
 import json
 import logging
@@ -222,7 +223,7 @@ def convert_to_extractive_process(
         section_header = "<SECTION-HEADER>"
         source_docs = [clean_billsum_text(doc) for doc in source_docs]
         source_docs = [doc.split(section_header) for doc in source_docs]
-        source_docs = [list(map(str.strip, doc)) for doc in source_docs]
+        source_docs = [list(filter(None, map(str.strip, doc))) for doc in source_docs]
         source_docs_tokenized = [
             list(
                 tokenize(
@@ -712,7 +713,7 @@ def cal_rouge(evaluated_ngrams, reference_ngrams):
     return {"f": f1_score, "p": precision, "r": recall}
 
 
-def assign_section_level_summaries(source_doc, target_doc):
+def assign_section_level_summaries(source_doc, target_doc, by_section=True, k=3):
     """For each document, which is originally a document-summary mapping, break down the summary such that each sentence
     of the summary is assigned to a section of the original document. Conversely, each section of the document could be
     assigned none or 1 or more than 1 sentence from the summary. These sentences would be concatenated together for each
@@ -733,44 +734,63 @@ def assign_section_level_summaries(source_doc, target_doc):
         rouge_score = rouge_1 + rouge_2
         return rouge_score
 
-    # Clean target_doc
-    clean_target_doc = [_rouge_clean(" ".join(doc)).split() for doc in target_doc]
+    if by_section:
+        # Clean target_doc
+        clean_target_doc = [_rouge_clean(" ".join(doc)).split() for doc in target_doc]
 
-    # Clean source doc by section and assign section level summaries
-    clean_source_doc = []
-    for i, source_section in enumerate(source_doc):
-        source_section = sum(source_section, [])
-        source_section = _rouge_clean(" ".join(source_section)).split()
-        clean_source_doc.append(source_section)
+        # Clean source doc by section and assign section level summaries
+        clean_source_doc = []
+        for source_section in source_doc:
+            source_section = [
+                _rouge_clean(" ".join(source_sent)).split()
+                for source_sent in source_section
+            ]
+            clean_source_doc.append(source_section)
 
-    section_summary_mapping = defaultdict(list)
-    for j, target_sent in enumerate(clean_target_doc):
-        cur_max_rouge, idx_of_cur_max_rouge = 0.0, 0
-        for i, source_section in enumerate(clean_source_doc):
-            evaluated_1grams = _get_word_ngrams(1, [source_section])
-            reference_1grams = _get_word_ngrams(1, [target_sent])
-            evaluated_2grams = _get_word_ngrams(2, [source_section])
-            reference_2grams = _get_word_ngrams(2, [target_sent])
-            rouge = _cal_rouge(
-                evaluated_1grams, reference_1grams, evaluated_2grams, reference_2grams
-            )
-            if rouge > cur_max_rouge:
-                cur_max_rouge = rouge
-                idx_of_cur_max_rouge = i
-        section_summary_mapping[idx_of_cur_max_rouge].append(j)
+        section_summary_mapping = defaultdict(list)
+        for j, target_sent in enumerate(clean_target_doc):
+            rouge_scores = []
+            for i, source_section in enumerate(clean_source_doc):
+                max_rouge = 0.0
+                for source_sent in source_section:
+                    evaluated_1grams = _get_word_ngrams(1, [source_sent])
+                    reference_1grams = _get_word_ngrams(1, [target_sent])
+                    evaluated_2grams = _get_word_ngrams(2, [source_sent])
+                    reference_2grams = _get_word_ngrams(2, [target_sent])
+                    rouge = _cal_rouge(
+                        evaluated_1grams,
+                        reference_1grams,
+                        evaluated_2grams,
+                        reference_2grams,
+                    )
+                    max_rouge = max(max_rouge, rouge)
+                heapq.heappush(rouge_scores, (max_rouge, i))
 
-    target_doc_by_section = []
-    for i in range(len(source_doc)):
-        j_list = section_summary_mapping.get(i, [])
-        section_summary = [target_doc[j] for j in j_list]
-        target_doc_by_section.append(section_summary)
+            top_k = heapq.nlargest(k, rouge_scores)
+            for _, i in top_k:
+                section_summary_mapping[i].append(j)
 
-    assert len(target_doc) == sum(len(section) for section in target_doc_by_section)
+        target_doc_by_section = []
+        for i in range(len(source_doc)):
+            j_list = section_summary_mapping.get(i, [])
+            section_summary = [target_doc[j] for j in j_list]
+            target_doc_by_section.append(section_summary)
 
-    del clean_source_doc
-    del clean_target_doc
+        num_sections = len(clean_source_doc)
+        assert min(num_sections, k) * len(target_doc) == sum(
+            len(section) for section in target_doc_by_section
+        )
 
-    return source_doc, target_doc_by_section, target_doc
+        del clean_source_doc
+        del clean_target_doc
+
+        return source_doc, target_doc_by_section, target_doc
+
+    return (
+        source_doc,
+        [[row[:] for row in target_doc] for _ in range(len(source_doc))],
+        target_doc,
+    )
 
 
 if __name__ == "__main__":
