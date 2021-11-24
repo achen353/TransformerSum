@@ -161,13 +161,7 @@ class FSDataset(torch.utils.data.Dataset):
         return lengths
 
     def __getitem__(self, index):
-        file_index = np.searchsorted(
-            self.lengths,
-            [
-                index,
-            ],
-            side="right",
-        )[0]
+        file_index = np.searchsorted(self.lengths, [index], side="right")[0]
 
         if file_index > 0:
             total_lines_in_other_files = self.lengths[file_index - 1]
@@ -611,6 +605,7 @@ class SentencesProcessor:
         mask_padding_with_zero=True,
         create_attention_mask=True,
         pad_ids_and_attention=True,
+        by_section_test_split=None,
     ):
         """
         The process that actually creates the features.
@@ -619,7 +614,7 @@ class SentencesProcessor:
         easily be done in parallel using ``Pool.map``.
         """
         ex_index, example, label = input_information
-        if ex_index % 1000 == 0:
+        if not by_section_test_split and ex_index % 1000 == 0:
             logger.info("Generating features for example %s/%s", ex_index, num_examples)
         if bert_compatible_cls:
             # convert `example.text` to array of sentences
@@ -922,7 +917,15 @@ class SentencesProcessor:
         )
 
         if by_section_test_split:
-            for doc_examples, doc_labels in zip(self.examples), self.labels:
+            for ex_index, (doc_examples, doc_labels) in enumerate(
+                zip(self.examples, self.labels)
+            ):
+                if ex_index % 10 == 0:
+                    logger.info(
+                        "Generating features for example %s/%s",
+                        ex_index,
+                        len(self.labels),
+                    )
                 doc_features = []
                 for rtn_features in pool.map(
                     _get_features_process,
@@ -941,7 +944,7 @@ class SentencesProcessor:
         pool.join()
 
         if by_section_test_split:
-            assert return_type == "list"
+            assert return_type == "lists"
 
         if not return_type:
             return features
@@ -985,15 +988,23 @@ class SentencesProcessor:
             dataset = torch.utils.data.TensorDataset(*final_tensors)
 
         elif return_type == "lists":
-            dataset = []
-            for doc_examples in features:
-                dataset.append([example.to_dict() for example in doc_examples])
+            if by_section_test_split:
+                from collections import defaultdict
+
+                dataset = []
+                for doc_examples in features:
+                    doc_dict = defaultdict(list)
+                    for example in doc_examples:
+                        for key, val in example.to_dict().items():
+                            doc_dict[key].append(val)
+                    dataset.append(doc_dict)
+            else:
+                dataset = [example.to_dict() for example in features]
 
         if save_to_path:
             final_save_name = save_to_name if save_to_name else ("dataset_" + self.name)
             dataset_path = os.path.join(
-                save_to_path,
-                (final_save_name + "." + save_as_type),
+                save_to_path, (final_save_name + "." + save_as_type)
             )
             logger.info("Saving dataset into cached file %s", dataset_path)
             if save_as_type == "txt":
@@ -1010,10 +1021,7 @@ class SentencesProcessor:
     def load(self, load_from_path, dataset_name=None):
         """Attempts to load the dataset from storage. If that fails, will return None."""
         final_load_name = dataset_name if dataset_name else ("dataset_" + self.name)
-        dataset_path = os.path.join(
-            load_from_path,
-            (final_load_name + ".pt"),
-        )
+        dataset_path = os.path.join(load_from_path, (final_load_name + ".pt"))
 
         if os.path.exists(dataset_path):
             logger.info("Loading data from file %s", dataset_path)
