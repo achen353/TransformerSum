@@ -449,6 +449,11 @@ if __name__ == "__main__":
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Set the logging level (default: 'Info').",
     )
+    parser.add_argument(
+        "--by_section",
+        action="store_true",
+        help="Mark the dataset as being prepared by section with DANCER divide and conquer approach.",
+    )
 
     main_args = parser.parse_known_args()
 

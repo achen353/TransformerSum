@@ -139,6 +139,91 @@ def pad_batch_collate(batch, modifier=None):
     return final_dictionary
 
 
+def pad_section_collate(batch, modifier=None):
+    elem = batch[0]
+    final_dictionary = {}
+
+    for key in elem:
+        # don't process `sent_lengths`
+        if key == "sent_lengths":
+            continue
+
+        feature_list = [sec_feat for sec_feat in elem[key]]
+        if key == "sent_rep_token_ids":
+            feature_list = pad(feature_list, -1)
+            sent_rep_token_ids = torch.tensor(feature_list)
+
+            sent_rep_mask = ~(sent_rep_token_ids == -1)
+            sent_rep_token_ids[sent_rep_token_ids == -1] = 0
+
+            final_dictionary["sent_rep_token_ids"] = sent_rep_token_ids
+            final_dictionary["sent_rep_mask"] = sent_rep_mask
+            continue  # go to next key
+        if key == "input_ids":
+            input_ids = feature_list
+
+            # Attention
+            # The mask has 1 for real tokens and 0 for padding tokens. Only real
+            # tokens are attended to.
+            attention_mask = [[1] * len(ids) for ids in input_ids]
+
+            input_ids_width = max(len(ids) for ids in input_ids)
+            input_ids = pad(input_ids, 0, width=input_ids_width)
+            input_ids = torch.tensor(input_ids)
+            attention_mask = pad(attention_mask, 0)
+            attention_mask = torch.tensor(attention_mask)
+
+            if "sent_lengths" in elem:
+                sent_lengths = []
+                sent_lengths_mask = []
+                sent_lengths_width = max(
+                    len(sec_sent_lengths) + 1
+                    for sec_sent_lengths in elem["sent_lengths"]
+                )
+                for current_sent_lens in elem["sent_lengths"]:
+                    current_sent_lengths_mask = [True] * len(current_sent_lens)
+                    num_to_add = sent_lengths_width - len(current_sent_lens)
+                    total_value_to_add = input_ids_width - sum(current_sent_lens)
+                    while num_to_add > 1:
+                        num_to_add -= 1
+                        # total_value_to_add -= 1
+                        current_sent_lens.append(0)
+                        current_sent_lengths_mask.append(False)
+                    # if a value needs to be added to make `sum(current_sent_lens)` the total input
+                    # sequence length OR there is one more number to add (this can happen if the
+                    # input sequence exactly ends with a sentence, making the total of the lengths
+                    # the length of the sequence, or if there is one sentence that takes up the
+                    # entire sequence)
+                    if total_value_to_add > 0 or num_to_add == 1:
+                        current_sent_lens.append(total_value_to_add)
+                        current_sent_lengths_mask.append(False)
+
+                    sent_lengths.append(current_sent_lens)
+                    sent_lengths_mask.append(current_sent_lengths_mask)
+                final_dictionary["sent_lengths"] = sent_lengths
+                final_dictionary["sent_lengths_mask"] = torch.tensor(sent_lengths_mask)
+
+            final_dictionary["input_ids"] = input_ids
+            final_dictionary["attention_mask"] = attention_mask
+
+            continue
+
+        if key in ("source", "target"):
+            final_dictionary[key] = feature_list
+            continue
+
+        if key in ("labels", "token_type_ids"):
+            feature_list = pad(feature_list, 0)
+
+        feature_list = torch.tensor(feature_list)
+        final_dictionary[key] = feature_list
+
+    if modifier:
+        final_dictionary = modifier(final_dictionary)
+
+    return final_dictionary
+
+
 class FSDataset(torch.utils.data.Dataset):
     def __init__(self, files_list, shuffle=True, verbose=False):
         super(FSDataset).__init__()
@@ -161,13 +246,7 @@ class FSDataset(torch.utils.data.Dataset):
         return lengths
 
     def __getitem__(self, index):
-        file_index = np.searchsorted(
-            self.lengths,
-            [
-                index,
-            ],
-            side="right",
-        )[0]
+        file_index = np.searchsorted(self.lengths, [index], side="right")[0]
 
         if file_index > 0:
             total_lines_in_other_files = self.lengths[file_index - 1]
@@ -475,6 +554,7 @@ class SentencesProcessor:
         targets=None,
         overwrite_labels=False,
         overwrite_examples=False,
+        by_section_test_split=None,
     ):
         r"""Primary method of adding example sets of texts, labels, ids, and targets
         to the ``SentencesProcessor``
@@ -503,38 +583,75 @@ class SentencesProcessor:
         Returns:
             list: The examples as ``InputExample``\ s that have been added.
         """
-        assert texts  # not an empty array
-        assert labels is None or len(texts) == len(labels)
-        assert ids is None or len(texts) == len(ids)
-        assert not (labels and oracle_ids)
-        assert isinstance(texts, list)
+        if by_section_test_split:
+            assert ids is None
+            assert oracle_ids is None
+            assert texts
+            assert labels
 
-        if ids is None:
-            ids = [None] * len(texts)
-        if labels is None:
-            if oracle_ids:  # convert `oracle_ids` to `labels`
-                labels = []
-                for text_set, oracle_id in zip(texts, oracle_ids):
-                    text_label = [0] * len(text_set)
-                    for l_id in oracle_id:
-                        text_label[l_id] = 1
-                    labels.append(text_label)
-            else:
-                labels = [None] * len(texts)
+            examples = []
+            added_labels = []
+            for doc_idx, (sec_texts, sec_labels) in enumerate(zip(texts, labels)):
+                assert sec_texts  # not an empty 2d array
+                assert sec_labels is None or len(sec_texts) == len(sec_labels)
+                assert isinstance(sec_texts, list)
 
-        examples = []
-        added_labels = []
-        for idx, (text_set, label_set, guid) in enumerate(zip(texts, labels, ids)):
-            if not text_set or not label_set:
-                continue  # input()
-            added_labels.append(label_set)
-            if targets:
-                example = InputExample(
-                    guid=guid, text=text_set, labels=label_set, target=targets[idx]
-                )
-            else:
-                example = InputExample(guid=guid, text=text_set, labels=label_set)
-            examples.append(example)
+                sec_ids = [None] * len(texts)
+
+                sec_examples = []
+                sec_added_labels = []
+                for text_set, label_set, guid in zip(sec_texts, sec_labels, sec_ids):
+                    if not text_set or not label_set:
+                        continue  # input()
+                    sec_added_labels.append(label_set)
+                    if targets:
+                        example = InputExample(
+                            guid=guid,
+                            text=text_set,
+                            labels=label_set,
+                            target=targets[doc_idx],
+                        )
+                    else:
+                        example = InputExample(
+                            guid=guid, text=text_set, labels=label_set
+                        )
+                    sec_examples.append(example)
+
+                examples.append(sec_examples)
+                added_labels.append(sec_added_labels)
+        else:
+            assert texts  # not an empty array
+            assert labels is None or len(texts) == len(labels)
+            assert ids is None or len(texts) == len(ids)
+            assert not (labels and oracle_ids)
+            assert isinstance(texts, list)
+
+            if ids is None:
+                ids = [None] * len(texts)
+            if labels is None:
+                if oracle_ids:  # convert `oracle_ids` to `labels`
+                    labels = []
+                    for text_set, oracle_id in zip(texts, oracle_ids):
+                        text_label = [0] * len(text_set)
+                        for l_id in oracle_id:
+                            text_label[l_id] = 1
+                        labels.append(text_label)
+                else:
+                    labels = [None] * len(texts)
+
+            examples = []
+            added_labels = []
+            for idx, (text_set, label_set, guid) in enumerate(zip(texts, labels, ids)):
+                if not text_set or not label_set:
+                    continue  # input()
+                added_labels.append(label_set)
+                if targets:
+                    example = InputExample(
+                        guid=guid, text=text_set, labels=label_set, target=targets[idx]
+                    )
+                else:
+                    example = InputExample(guid=guid, text=text_set, labels=label_set)
+                examples.append(example)
 
         # Update examples
         if overwrite_examples:
@@ -570,6 +687,7 @@ class SentencesProcessor:
         mask_padding_with_zero=True,
         create_attention_mask=True,
         pad_ids_and_attention=True,
+        by_section_test_split=None,
     ):
         """
         The process that actually creates the features.
@@ -578,7 +696,7 @@ class SentencesProcessor:
         easily be done in parallel using ``Pool.map``.
         """
         ex_index, example, label = input_information
-        if ex_index % 1000 == 0:
+        if not by_section_test_split and ex_index % 1000 == 0:
             logger.info("Generating features for example %s/%s", ex_index, num_examples)
         if bert_compatible_cls:
             # convert `example.text` to array of sentences
@@ -735,6 +853,7 @@ class SentencesProcessor:
         save_to_path=None,
         save_to_name=None,
         save_as_type="txt",
+        by_section_test_split=None,
     ):
         r"""Convert the examples stored by the ``SentencesProcessor`` to features that can be used
         by a model. The following processes can be performed: tokenization, token type ids (to
@@ -876,16 +995,38 @@ class SentencesProcessor:
             mask_padding_with_zero=mask_padding_with_zero,
             create_attention_mask=create_attention_mask,
             pad_ids_and_attention=pad_ids_and_attention,
+            by_section_test_split=by_section_test_split,
         )
 
-        for rtn_features in pool.map(
-            _get_features_process,
-            zip(range(len(self.labels)), self.examples, self.labels),
-        ):
-            features.append(rtn_features)
+        if by_section_test_split:
+            for ex_index, (doc_examples, doc_labels) in enumerate(
+                zip(self.examples, self.labels)
+            ):
+                if ex_index % 10 == 0:
+                    logger.info(
+                        "Generating features for example %s/%s",
+                        ex_index,
+                        len(self.labels),
+                    )
+                doc_features = []
+                for rtn_features in pool.map(
+                    _get_features_process,
+                    zip(range(len(doc_labels)), doc_examples, doc_labels),
+                ):
+                    doc_features.append(rtn_features)
+            features.append(doc_features)
+        else:
+            for rtn_features in pool.map(
+                _get_features_process,
+                zip(range(len(self.labels)), self.examples, self.labels),
+            ):
+                features.append(rtn_features)
 
         pool.close()
         pool.join()
+
+        if by_section_test_split:
+            assert return_type == "lists"
 
         if not return_type:
             return features
@@ -929,13 +1070,23 @@ class SentencesProcessor:
             dataset = torch.utils.data.TensorDataset(*final_tensors)
 
         elif return_type == "lists":
-            dataset = [example.to_dict() for example in features]
+            if by_section_test_split:
+                from collections import defaultdict
+
+                dataset = []
+                for doc_examples in features:
+                    doc_dict = defaultdict(list)
+                    for example in doc_examples:
+                        for key, val in example.to_dict().items():
+                            doc_dict[key].append(val)
+                    dataset.append(doc_dict)
+            else:
+                dataset = [example.to_dict() for example in features]
 
         if save_to_path:
             final_save_name = save_to_name if save_to_name else ("dataset_" + self.name)
             dataset_path = os.path.join(
-                save_to_path,
-                (final_save_name + "." + save_as_type),
+                save_to_path, (final_save_name + "." + save_as_type)
             )
             logger.info("Saving dataset into cached file %s", dataset_path)
             if save_as_type == "txt":
@@ -952,10 +1103,7 @@ class SentencesProcessor:
     def load(self, load_from_path, dataset_name=None):
         """Attempts to load the dataset from storage. If that fails, will return None."""
         final_load_name = dataset_name if dataset_name else ("dataset_" + self.name)
-        dataset_path = os.path.join(
-            load_from_path,
-            (final_load_name + ".pt"),
-        )
+        dataset_path = os.path.join(load_from_path, (final_load_name + ".pt"))
 
         if os.path.exists(dataset_path):
             logger.info("Loading data from file %s", dataset_path)

@@ -51,15 +51,26 @@ python main.py \
     --data_path ../datasets/billsum_extractive \
     --weights_save_path ./trained_models \
     --do_train \
-    --max_steps 50000 \
+    --max_steps 100 \
     --max_seq_length 512 \
-    --data_type txt
+    --data_type txt \
+    --by_section            # add if you're using D&C (aka DANCER) for BillSum
 ```
 The default `--model_type` is set to be `bert`, hence the 512 for `--max_seq_length`. Modify this value depending
 on your model type.
 
 For more argument options, see the [documentation](https://transformersum.readthedocs.io/en/latest/extractive/training.html) 
 for training an extractive summarizer.
+
+```
+python main.py \
+    --mode extractive
+    --data_path ../datasets/billsum_extractive
+    --load_weights ./path/to/checkpoint.ckpt     
+    --do_test     
+    --max_seq_length 512 
+    --by_section            # add if you're using D&C (aka DANCER) for BillSum
+```
 
 # Training an Abstractive BillSum Summarizer
 Run the following command. The default dataset and preprocessing steps have been set for BillSum dataset so there's no
