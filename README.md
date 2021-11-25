@@ -61,7 +61,8 @@ on your model type.
 
 For more argument options, see the [documentation](https://transformersum.readthedocs.io/en/latest/extractive/training.html) 
 for training an extractive summarizer.
-
+# Testing an Extractive BillSum Summarizer
+Use the `--do_test` flag instead of `do_train` and enable `--by_section` for calculating the D&C performance on BillSum.
 ```
 python main.py \
     --mode extractive
