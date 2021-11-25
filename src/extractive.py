@@ -24,7 +24,13 @@ from classifier import (
     SimpleLinearClassifier,
     TransformerEncoderClassifier,
 )
-from data import FSDataset, FSIterableDataset, SentencesProcessor, pad_batch_collate
+from data import (
+    FSDataset,
+    FSIterableDataset,
+    SentencesProcessor,
+    pad_batch_collate,
+    pad_section_collate,
+)
 from helpers import block_trigrams, generic_configure_optimizers, load_json, test_rouge
 from pooling import Pooling
 
@@ -262,10 +268,7 @@ class ExtractiveSummarizer(pl.LightningModule):
             the ``sent_rep_mask`` or ``sent_lengths_mask`` depending on the pooling mode used
             during model initialization.
         """  # noqa: E501
-        inputs = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-        }
+        inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
         if not self.hparams.no_use_token_type_ids:
             inputs["token_type_ids"] = token_type_ids
 
@@ -540,8 +543,7 @@ class ExtractiveSummarizer(pl.LightningModule):
             # rescan for dataset files after data type is determined
             dataset_files = glob.glob(
                 os.path.join(
-                    self.hparams.data_path,
-                    "*" + corpus_type + "." + inferred_data_type,
+                    self.hparams.data_path, "*" + corpus_type + "." + inferred_data_type
                 )
             )
 
@@ -591,8 +593,7 @@ class ExtractiveSummarizer(pl.LightningModule):
                 )
 
                 for _ in map(
-                    json_to_dataset_processor,
-                    zip(range(len(json_files)), json_files),
+                    json_to_dataset_processor, zip(range(len(json_files)), json_files)
                 ):
                     pass
                 # pool.close()
@@ -648,13 +649,19 @@ class ExtractiveSummarizer(pl.LightningModule):
         # Create `pad_batch_collate` function
         # If the model is a longformer then create the `global_attention_mask`
         if self.hparams.model_type == "longformer":
-
             self.pad_batch_collate = partial(
-                pad_batch_collate, modifier=longformer_modifier
+                pad_batch_collate
+                if not self.hparams.by_section
+                else pad_section_collate,
+                modifier=longformer_modifier,
             )
         else:
             # default is to just use the normal `pad_batch_collate` function
-            self.pad_batch_collate = pad_batch_collate
+            self.pad_batch_collate = (
+                pad_batch_collate
+                if not self.hparams.by_section
+                else pad_section_collate
+            )
 
     def train_dataloader(self):
         """Create dataloader for training if it has not already been created."""
@@ -699,7 +706,7 @@ class ExtractiveSummarizer(pl.LightningModule):
             test_dataset,
             num_workers=self.hparams.dataloader_num_workers,
             # sampler=test_sampler,
-            batch_size=self.hparams.batch_size,
+            batch_size=self.hparams.batch_size if not self.hparams.by_section else 1,
             collate_fn=self.pad_batch_collate,
         )
         return test_dataloader
@@ -936,73 +943,138 @@ class ExtractiveSummarizer(pl.LightningModule):
                 self.hparams.test_id_method,
             )
 
-        rouge_outputs = []
-        predictions = []
         # get ROUGE scores for each (source, target) pair
-        for idx, (source, source_ids, target) in enumerate(
-            zip(sources, selected_ids, targets)
-        ):
-            current_prediction = []
-            for sent_idx, i in enumerate(source_ids):
-                if i >= len(source):
-                    logger.debug(
-                        "Only %i examples selected from document %i in batch %i. This is likely "
-                        + "because some sentences received ranks so small they rounded to zero "
-                        + "and a padding 'sentence' was randomly chosen.",
-                        sent_idx + 1,
-                        idx,
-                        batch_idx,
+        if not self.hparams.by_section:
+            rouge_outputs = []
+            predictions = []
+            for idx, (source, source_ids, target) in enumerate(
+                zip(sources, selected_ids, targets)
+            ):
+                current_prediction = []
+                for sent_idx, i in enumerate(source_ids):
+                    if i >= len(source):
+                        logger.debug(
+                            "Only %i examples selected from document %i in batch %i. This is likely "
+                            + "because some sentences received ranks so small they rounded to zero "
+                            + "and a padding 'sentence' was randomly chosen.",
+                            sent_idx + 1,
+                            idx,
+                            batch_idx,
+                        )
+                        continue
+
+                    candidate = source[i].strip()
+                    # If trigram blocking is enabled and searching for matching trigrams finds no
+                    # matches then add the candidate to the current prediction list.
+                    # During the predicting process, Trigram Blocking is used to reduce redundancy.
+                    # Given selected summary S and a candidate sentence c, we will skip c is there
+                    # exists a trigram overlapping between c and S.
+                    if (not self.hparams.no_test_block_trigrams) and (
+                        not block_trigrams(candidate, current_prediction)
+                    ):
+                        current_prediction.append(candidate)
+
+                    # If the testing method is "top_k" and correct number of sentences have been
+                    # added then break the loop and stop adding sentences. If the testing method
+                    # is "greater_k" then we will continue to add all the sentences from `selected_ids`
+                    if (self.hparams.test_id_method == "top_k") and (
+                        len(current_prediction) >= self.hparams.test_k
+                    ):
+                        break
+
+                # See this issue https://github.com/google-research/google-research/issues/168
+                # for info about the differences between `pyrouge` and `rouge-score`.
+                # Archive Link: https://web.archive.org/web/20200622205503/https://github.com/google-research/google-research/issues/168  # noqa: E501
+                if self.hparams.test_use_pyrouge:
+                    # Convert `current_prediction` from list to string with a "<q>" between each
+                    # item/sentence. In ROUGE 1.5.5 (`pyrouge`), a "\n" indicates sentence
+                    # boundaries but the below "save_gold.txt" and "save_pred.txt" could not be
+                    # created if each sentence had to be separated by a newline. Thus, each
+                    # sentence is separated by a "<q>" token and is then converted to a newline
+                    # in `helpers.test_rouge`.
+                    current_prediction = "<q>".join(current_prediction)
+                    predictions.append(current_prediction)
+                else:
+                    # Convert `current_prediction` from list to string with a newline between each
+                    # item/sentence. `rouge-score` splits sentences by newline.
+                    current_prediction = "\n".join(current_prediction)
+                    target = target.replace("<q>", "\n")
+                    rouge_outputs.append(
+                        self.rouge_scorer.score(target, current_prediction)
                     )
-                    continue
 
-                candidate = source[i].strip()
-                # If trigram blocking is enabled and searching for matching trigrams finds no
-                # matches then add the candidate to the current prediction list.
-                # During the predicting process, Trigram Blocking is used to reduce redundancy.
-                # Given selected summary S and a candidate sentence c, we will skip c is there
-                # exists a trigram overlapping between c and S.
-                if (not self.hparams.no_test_block_trigrams) and (
-                    not block_trigrams(candidate, current_prediction)
-                ):
-                    current_prediction.append(candidate)
-
-                # If the testing method is "top_k" and correct number of sentences have been
-                # added then break the loop and stop adding sentences. If the testing method
-                # is "greater_k" then we will continue to add all the sentences from `selected_ids`
-                if (self.hparams.test_id_method == "top_k") and (
-                    len(current_prediction) >= self.hparams.test_k
-                ):
-                    break
-
-            # See this issue https://github.com/google-research/google-research/issues/168
-            # for info about the differences between `pyrouge` and `rouge-score`.
-            # Archive Link: https://web.archive.org/web/20200622205503/https://github.com/google-research/google-research/issues/168  # noqa: E501
             if self.hparams.test_use_pyrouge:
-                # Convert `current_prediction` from list to string with a "<q>" between each
-                # item/sentence. In ROUGE 1.5.5 (`pyrouge`), a "\n" indicates sentence
-                # boundaries but the below "save_gold.txt" and "save_pred.txt" could not be
-                # created if each sentence had to be separated by a newline. Thus, each
-                # sentence is separated by a "<q>" token and is then converted to a newline
-                # in `helpers.test_rouge`.
-                current_prediction = "<q>".join(current_prediction)
-                predictions.append(current_prediction)
-            else:
-                # Convert `current_prediction` from list to string with a newline between each
-                # item/sentence. `rouge-score` splits sentences by newline.
-                current_prediction = "\n".join(current_prediction)
-                target = target.replace("<q>", "\n")
-                rouge_outputs.append(
-                    self.rouge_scorer.score(target, current_prediction)
-                )
+                with open("save_gold.txt", "a+") as save_gold, open(
+                    "save_pred.txt", "a+"
+                ) as save_pred:
+                    for i in enumerate(targets):
+                        save_gold.write(targets[i].strip() + "\n")
+                    for i in enumerate(predictions):
+                        save_pred.write(predictions[i].strip() + "\n")
 
-        if self.hparams.test_use_pyrouge:
-            with open("save_gold.txt", "a+") as save_gold, open(
-                "save_pred.txt", "a+"
-            ) as save_pred:
-                for i in enumerate(targets):
-                    save_gold.write(targets[i].strip() + "\n")
-                for i in enumerate(predictions):
-                    save_pred.write(predictions[i].strip() + "\n")
+        else:
+            target = targets[0]
+            doc_prediction = []
+            for idx, (source, source_ids) in enumerate(zip(sources, selected_ids)):
+                section_prediction = []
+                for sent_idx, i in enumerate(source_ids):
+                    if i >= len(source):
+                        logger.debug(
+                            "Only %i examples selected from document %i in batch %i. This is likely "
+                            + "because some sentences received ranks so small they rounded to zero "
+                            + "and a padding 'sentence' was randomly chosen.",
+                            sent_idx + 1,
+                            idx,
+                            batch_idx,
+                        )
+                        continue
+
+                    candidate = source[i].strip()
+                    # If trigram blocking is enabled and searching for matching trigrams finds no
+                    # matches then add the candidate to the current prediction list.
+                    # During the predicting process, Trigram Blocking is used to reduce redundancy.
+                    # Given selected summary S and a candidate sentence c, we will skip c is there
+                    # exists a trigram overlapping between c and S.
+                    if (not self.hparams.no_test_block_trigrams) and (
+                        not block_trigrams(candidate, section_prediction)
+                    ):
+                        section_prediction.append(candidate)
+
+                    # If the testing method is "top_k" and correct number of sentences have been
+                    # added then break the loop and stop adding sentences. If the testing method
+                    # is "greater_k" then we will continue to add all the sentences from `selected_ids`
+                    if (self.hparams.test_id_method == "top_k") and (
+                        len(section_prediction) >= self.hparams.test_k
+                    ):
+                        break
+
+                # See this issue https://github.com/google-research/google-research/issues/168
+                # for info about the differences between `pyrouge` and `rouge-score`.
+                # Archive Link: https://web.archive.org/web/20200622205503/https://github.com/google-research/google-research/issues/168  # noqa: E501
+                if self.hparams.test_use_pyrouge:
+                    # Convert `section_prediction` from list to string with a "<q>" between each
+                    # item/sentence. In ROUGE 1.5.5 (`pyrouge`), a "\n" indicates sentence
+                    # boundaries but the below "save_gold.txt" and "save_pred.txt" could not be
+                    # created if each sentence had to be separated by a newline. Thus, each
+                    # sentence is separated by a "<q>" token and is then converted to a newline
+                    # in `helpers.test_rouge`.
+                    section_prediction = "<q>".join(section_prediction)
+                    doc_prediction.extend(section_prediction)
+                else:
+                    doc_prediction.extend(section_prediction)
+
+            if self.hparams.test_use_pyrouge:
+                with open("save_gold.txt", "a+") as save_gold, open(
+                    "save_pred.txt", "a+"
+                ) as save_pred:
+                    save_gold.write(target.strip() + "\n")
+                    save_pred.write(doc_prediction.strip() + "\n")
+            else:
+                # Convert `prediction` from list to string with a newline between each item/sentence.
+                # `rouge-score` splits sentences by newline.
+                doc_prediction = "\n".join(doc_prediction)
+                target = target.replace("<q>", "\n")
+                rouge_outputs = [self.rouge_scorer.score(target, doc_prediction)]
 
         output = OrderedDict(
             {

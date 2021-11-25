@@ -139,6 +139,91 @@ def pad_batch_collate(batch, modifier=None):
     return final_dictionary
 
 
+def pad_section_collate(batch, modifier=None):
+    elem = batch[0]
+    final_dictionary = {}
+
+    for key in elem:
+        # don't process `sent_lengths`
+        if key == "sent_lengths":
+            continue
+
+        feature_list = [sec_feat for sec_feat in elem[key]]
+        if key == "sent_rep_token_ids":
+            feature_list = pad(feature_list, -1)
+            sent_rep_token_ids = torch.tensor(feature_list)
+
+            sent_rep_mask = ~(sent_rep_token_ids == -1)
+            sent_rep_token_ids[sent_rep_token_ids == -1] = 0
+
+            final_dictionary["sent_rep_token_ids"] = sent_rep_token_ids
+            final_dictionary["sent_rep_mask"] = sent_rep_mask
+            continue  # go to next key
+        if key == "input_ids":
+            input_ids = feature_list
+
+            # Attention
+            # The mask has 1 for real tokens and 0 for padding tokens. Only real
+            # tokens are attended to.
+            attention_mask = [[1] * len(ids) for ids in input_ids]
+
+            input_ids_width = max(len(ids) for ids in input_ids)
+            input_ids = pad(input_ids, 0, width=input_ids_width)
+            input_ids = torch.tensor(input_ids)
+            attention_mask = pad(attention_mask, 0)
+            attention_mask = torch.tensor(attention_mask)
+
+            if "sent_lengths" in elem:
+                sent_lengths = []
+                sent_lengths_mask = []
+                sent_lengths_width = max(
+                    len(sec_sent_lengths) + 1
+                    for sec_sent_lengths in elem["sent_lengths"]
+                )
+                for current_sent_lens in elem["sent_lengths"]:
+                    current_sent_lengths_mask = [True] * len(current_sent_lens)
+                    num_to_add = sent_lengths_width - len(current_sent_lens)
+                    total_value_to_add = input_ids_width - sum(current_sent_lens)
+                    while num_to_add > 1:
+                        num_to_add -= 1
+                        # total_value_to_add -= 1
+                        current_sent_lens.append(0)
+                        current_sent_lengths_mask.append(False)
+                    # if a value needs to be added to make `sum(current_sent_lens)` the total input
+                    # sequence length OR there is one more number to add (this can happen if the
+                    # input sequence exactly ends with a sentence, making the total of the lengths
+                    # the length of the sequence, or if there is one sentence that takes up the
+                    # entire sequence)
+                    if total_value_to_add > 0 or num_to_add == 1:
+                        current_sent_lens.append(total_value_to_add)
+                        current_sent_lengths_mask.append(False)
+
+                    sent_lengths.append(current_sent_lens)
+                    sent_lengths_mask.append(current_sent_lengths_mask)
+                final_dictionary["sent_lengths"] = sent_lengths
+                final_dictionary["sent_lengths_mask"] = torch.tensor(sent_lengths_mask)
+
+            final_dictionary["input_ids"] = input_ids
+            final_dictionary["attention_mask"] = attention_mask
+
+            continue
+
+        if key in ("source", "target"):
+            final_dictionary[key] = feature_list
+            continue
+
+        if key in ("labels", "token_type_ids"):
+            feature_list = pad(feature_list, 0)
+
+        feature_list = torch.tensor(feature_list)
+        final_dictionary[key] = feature_list
+
+    if modifier:
+        final_dictionary = modifier(final_dictionary)
+
+    return final_dictionary
+
+
 class FSDataset(torch.utils.data.Dataset):
     def __init__(self, files_list, shuffle=True, verbose=False):
         super(FSDataset).__init__()
@@ -506,8 +591,7 @@ class SentencesProcessor:
 
             examples = []
             added_labels = []
-
-            for sec_texts, sec_labels in zip(texts, labels):
+            for doc_idx, (sec_texts, sec_labels) in enumerate(zip(texts, labels)):
                 assert sec_texts  # not an empty 2d array
                 assert sec_labels is None or len(sec_texts) == len(sec_labels)
                 assert isinstance(sec_texts, list)
@@ -516,9 +600,7 @@ class SentencesProcessor:
 
                 sec_examples = []
                 sec_added_labels = []
-                for idx, (text_set, label_set, guid) in enumerate(
-                    zip(sec_texts, sec_labels, sec_ids)
-                ):
+                for text_set, label_set, guid in zip(sec_texts, sec_labels, sec_ids):
                     if not text_set or not label_set:
                         continue  # input()
                     sec_added_labels.append(label_set)
@@ -527,7 +609,7 @@ class SentencesProcessor:
                             guid=guid,
                             text=text_set,
                             labels=label_set,
-                            target=targets[idx],
+                            target=targets[doc_idx],
                         )
                     else:
                         example = InputExample(
