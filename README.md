@@ -68,6 +68,9 @@ The project contains two different ROUGE score calculations: `rouge-score` and `
 option. It is a pure python implementation of ROUGE designed to replicate the results of the official ROUGE package. 
 While this option is cleaner (no perl installation required, no temporary directories, faster processing) than using 
 `pyrouge`, this option should not be used for official results due to minor score differences with `pyrouge`.
+
+You will need to perform extra installation steps for `pyrouge`. Refer to this [post](https://stackoverflow.com/a/57686103/11526586)
+for the steps.
 ```
 python main.py \
     --mode extractive \
