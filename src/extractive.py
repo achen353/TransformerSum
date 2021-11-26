@@ -221,6 +221,7 @@ class ExtractiveSummarizer(pl.LightningModule):
         self.train_dataloader_object = None  # not created yet
         self.datasets = None
         self.pad_batch_collate = None
+        self.pad_section_collate = None
         self.global_step_tracker = None
         self.rouge_metrics = None
         self.rouge_scorer = None
@@ -650,18 +651,15 @@ class ExtractiveSummarizer(pl.LightningModule):
         # If the model is a longformer then create the `global_attention_mask`
         if self.hparams.model_type == "longformer":
             self.pad_batch_collate = partial(
-                pad_batch_collate
-                if not self.hparams.by_section
-                else pad_section_collate,
-                modifier=longformer_modifier,
+                pad_batch_collate, modifier=longformer_modifier
+            )
+            self.pad_section_collate = partial(
+                pad_section_collate, modifier=longformer_modifier
             )
         else:
             # default is to just use the normal `pad_batch_collate` function
-            self.pad_batch_collate = (
-                pad_batch_collate
-                if not self.hparams.by_section
-                else pad_section_collate
-            )
+            self.pad_batch_collate = pad_batch_collate
+            self.pad_section_collate = pad_section_collate
 
     def train_dataloader(self):
         """Create dataloader for training if it has not already been created."""
@@ -707,7 +705,9 @@ class ExtractiveSummarizer(pl.LightningModule):
             num_workers=self.hparams.dataloader_num_workers,
             # sampler=test_sampler,
             batch_size=self.hparams.batch_size if not self.hparams.by_section else 1,
-            collate_fn=self.pad_batch_collate,
+            collate_fn=self.pad_batch_collate
+            if not self.hparams.by_section
+            else self.pad_section_collate,
         )
         return test_dataloader
 
