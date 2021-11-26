@@ -67,7 +67,7 @@ Use the `--do_test` flag instead of `do_train` and enable `--by_section` for cal
 python main.py \
     --mode extractive \
     --data_path ../datasets/billsum_extractive \
-    --load_weights ./path/to/checkpoint.ckpt \    
+    --load_weights ./path/to/checkpoint.ckpt \
     --do_test \
     --max_seq_length 512 \
     --by_section            # add if you're using D&C (aka DANCER) for BillSum
