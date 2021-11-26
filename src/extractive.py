@@ -705,7 +705,9 @@ class ExtractiveSummarizer(pl.LightningModule):
             num_workers=self.hparams.dataloader_num_workers,
             # sampler=test_sampler,
             batch_size=self.hparams.batch_size if not self.hparams.by_section else 1,
-            collate_fn=self.pad_batch_collate if not self.hparams.by_section else self.pad_section_collate,
+            collate_fn=self.pad_batch_collate
+            if not self.hparams.by_section
+            else self.pad_section_collate,
         )
         return test_dataloader
 
