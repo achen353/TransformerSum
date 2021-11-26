@@ -1048,22 +1048,20 @@ class ExtractiveSummarizer(pl.LightningModule):
                     ):
                         break
 
+                doc_prediction.extend(section_prediction)
+
+            if self.hparams.test_use_pyrouge:
+                rouge_outputs = []
                 # See this issue https://github.com/google-research/google-research/issues/168
                 # for info about the differences between `pyrouge` and `rouge-score`.
                 # Archive Link: https://web.archive.org/web/20200622205503/https://github.com/google-research/google-research/issues/168  # noqa: E501
-                if self.hparams.test_use_pyrouge:
-                    # Convert `section_prediction` from list to string with a "<q>" between each
-                    # item/sentence. In ROUGE 1.5.5 (`pyrouge`), a "\n" indicates sentence
-                    # boundaries but the below "save_gold.txt" and "save_pred.txt" could not be
-                    # created if each sentence had to be separated by a newline. Thus, each
-                    # sentence is separated by a "<q>" token and is then converted to a newline
-                    # in `helpers.test_rouge`.
-                    section_prediction = "<q>".join(section_prediction)
-                    doc_prediction.extend(section_prediction)
-                else:
-                    doc_prediction.extend(section_prediction)
-
-            if self.hparams.test_use_pyrouge:
+                # Convert `section_prediction` from list to string with a "<q>" between each
+                # item/sentence. In ROUGE 1.5.5 (`pyrouge`), a "\n" indicates sentence
+                # boundaries but the below "save_gold.txt" and "save_pred.txt" could not be
+                # created if each sentence had to be separated by a newline. Thus, each
+                # sentence is separated by a "<q>" token and is then converted to a newline
+                # in `helpers.test_rouge`.
+                doc_prediction = "<q>".join(doc_prediction)
                 with open("save_gold.txt", "a+") as save_gold, open(
                     "save_pred.txt", "a+"
                 ) as save_pred:
