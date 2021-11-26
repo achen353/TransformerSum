@@ -72,13 +72,15 @@ While this option is cleaner (no perl installation required, no temporary direct
 You will need to perform extra installation steps for `pyrouge`. Refer to this [post](https://stackoverflow.com/a/57686103/11526586)
 for the steps.
 ```
+# Add `--by-section` if you're using D&C (aka DANCER) for BillSum
+
 python main.py \
     --mode extractive \
     --data_path ../datasets/billsum_extractive \
     --load_weights ./path/to/checkpoint.ckpt \
     --do_test \
     --max_seq_length 512 \
-    --by_section \          # add if you're using D&C (aka DANCER) for BillSum
+    --by_section \
     --test_use_pyrouge      # we want official ROUGE score results
 ```
 
