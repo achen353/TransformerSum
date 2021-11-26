@@ -63,6 +63,11 @@ For more argument options, see the [documentation](https://transformersum.readth
 for training an extractive summarizer.
 # Testing an Extractive BillSum Summarizer
 Use the `--do_test` flag instead of `do_train` and enable `--by_section` for calculating the D&C performance on BillSum.
+
+The project contains two different ROUGE score calculations: `rouge-score` and `pyrouge`. `rouge-score` is the default 
+option. It is a pure python implementation of ROUGE designed to replicate the results of the official ROUGE package. 
+While this option is cleaner (no perl installation required, no temporary directories, faster processing) than using 
+`pyrouge`, this option should not be used for official results due to minor score differences with `pyrouge`.
 ```
 python main.py \
     --mode extractive \
@@ -70,7 +75,8 @@ python main.py \
     --load_weights ./path/to/checkpoint.ckpt \
     --do_test \
     --max_seq_length 512 \
-    --by_section            # add if you're using D&C (aka DANCER) for BillSum
+    --by_section \          # add if you're using D&C (aka DANCER) for BillSum
+    --test_use_pyrouge      # we want official ROUGE score results
 ```
 
 # Training an Abstractive BillSum Summarizer
