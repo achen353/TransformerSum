@@ -25,7 +25,7 @@ conducting experiments under 5 different settings:
 5. `D&C BERT (no sec)`: This is a simplification of the D&C approach. For each section in the original text, we just correspond it to the ground truth summary of the entire document.
 
 ### Congressional Bills (`test` split) 
-|                            | Rouge-1 F-1 | Rouge-2 F-1 | Rouge-L F-1 |
+|                            | ROUGE-1 F1 | ROUGE-2 F1 | ROUGE-L F1 |
 | -------------------------- |------:|------:|------:|
 | SumBasic                   | 30.56 | 15.33 | 23.75 |
 | LSA                        | 32.24 | 14.02 | 23.75 |
@@ -43,7 +43,7 @@ conducting experiments under 5 different settings:
 | OURS: D&C BERT (no sec)    | 53.33 | 35.36 | 51.19 |
 
 ### CA Bills (`ca_test` split) 
-|                            | Rouge-1 F-1 | Rouge-2 F-1 | Rouge-L F-1 |
+|                            | ROUGE-1 F1 | ROUGE-2 F1 | ROUGE-L F1 |
 | -------------------------- |------:|------:|------:|
 | SumBasic                   | 35.47 | 16.16 | 30.10 |
 | LSA                        | 35.05 | 16.34 | 30.10 |
