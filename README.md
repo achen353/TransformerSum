@@ -1,5 +1,5 @@
 # Legal Document Summarization
-Perform extractive summarization on legal documents using BERT in a divide-and-conquer fasion.
+Perform extractive summarization on legal documents using BERT in a divide-and-conquer fashion.
 
 # Dataset
 For our experiments, we are using the [BillSum](https://github.com/FiscalNote/BillSum) dataset. It contains abstractive
@@ -59,6 +59,8 @@ conducting experiments under 5 different settings:
 | OURS: D&C BERT (K = 2)     | 50.89 | 42.76 | 50.89 |
 | OURS: D&C BERT (K = 3)     | 50.89 | 42.76 | 50.89 |
 | OURS: D&C BERT (no sec)    | 50.89 | 42.76 | 50.89 |
+
+See full [report](CSE_8803_DLT_Project_Report_Legal_Document_Summarization.pdf) here.
 
 ## Training Configs
 All the training is done with the default hyper-parameters for this program (details available soon).
